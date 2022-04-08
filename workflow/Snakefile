@@ -1,0 +1,113 @@
+"""Main module."""
+
+
+import os
+from os.path import basename, join
+import pandas as pd
+from utils import *
+
+
+# Load program parameters and resources
+configfile: '/home/lam4003/bin/camp_binning/configs/parameters.yaml'
+configfile: '/home/lam4003/bin/camp_binning/configs/resources.yaml'
+
+
+# Load and/or make the working directory structure
+dirs = Workflow_Dirs(config['work_dir'], 'binning')
+
+
+# Load sample names and input files 
+SAMPLES = ingest_samples(config['samples'], dirs.TMP)
+
+
+# --- Workflow output --- #
+
+rule all:
+    input:
+        join(dirs.OUT, 'final_reports', 'samples.csv') # sample name, bin directories
+
+
+# --- Workflow modules --- #
+
+rule map_sort:
+    input:
+        fwd = join(dirs.TMP, '{sample}_1.fastq'),
+        rev = join(dirs.TMP, '{sample}_2.fastq'),
+        ctg = join(dirs.TMP, '{sample}.fasta'),
+    output:
+        join(dirs.OUT, '0_contig_coverage', '{sample}', 'coverage.bam'), # TODO temp?
+        join(dirs.OUT, '0_contig_coverage', '{sample}', 'coverage.bam.bai'),
+    log:
+        join(dirs.LOG, 'map_sort', '{sample}.out'),
+    threads: config['map_sort_threads'],
+    resources:
+        mem = lambda wildcards, attempt: \
+              int(config['map_sort_mem_mb']) + 10000 * attempt,
+    params:
+        out_dir = join(dirs.OUT, '0_contig_coverage', '{sample}'),
+    shell:
+        """
+        CTG_PREFIX=$(basename {input.ctg} .fasta)
+        mkdir -p {params.out_dir}
+        bowtie2-build {input.ctg} {params.out_dir}/$CTG_PREFIX
+        bowtie2 -x {params.out_dir}/$CTG_PREFIX -p {threads} \
+            -1 {input.fwd} -2 {input.rev} | \
+            samtools view -@ {threads} -uS - | \
+            samtools sort -@ {threads} - -o {params.out_dir}/coverage.bam
+        samtools index -@ {threads} {params.out_dir}/coverage.bam
+        """
+
+
+rule calculate_depth:
+    input:
+        join(dirs.OUT, '0_contig_coverage', '{sample}', 'coverage.bam'),
+    output:
+        join(dirs.OUT, '0_contig_coverage', '{sample}', 'coverage.txt'),
+    log:
+        join(dirs.LOG, 'calculate_depth', '{sample}.out'),
+    shell:
+        """
+        jgi_summarize_bam_contig_depths {input} --outputDepth {output}
+        """
+
+
+rule metabat2_binning:
+    input:
+        cov = join(dirs.OUT, '0_contig_coverage', '{sample}', 'coverage.txt'),
+        ctg = join(dirs.TMP, '{sample}.fasta'),
+    output:
+        join(dirs.OUT, '1_metabat2', '{sample}', 'done.txt'),
+    log:
+        join(dirs.LOG, 'metabat2_binning', '{sample}.out'), 
+    threads: config['metabat2_binning_threads'],
+    resources:
+        mem = lambda wildcards, attempt: \
+              int(config['metabat2_binning_mem_mb']) + 40000 * attempt,
+    params:
+        min_len = config['min_contig_len'],
+        out_dir = join(dirs.OUT, '1_metabat2', '{sample}'),
+    shell:
+        """
+        metabat2 -m {params.min_len} -t {threads} --unbinned \
+            -i {input.ctg} -a {input.cov} -o {params.out_dir}
+        echo {params.out_dir} > {output}
+        """
+
+
+rule make_config:
+    input:
+        expand(join(dirs.OUT, '1_metabat2', '{sample}', 'done.txt'), \
+               sample = SAMPLES),
+    output:
+        join(dirs.OUT, 'final_reports', 'samples.csv')
+    run:
+        dct = {}
+        for i in input:
+            d = open(str(i), 'r').readline().strip()
+            dct[basename(d)] = d
+        df = pd.DataFrame.from_dict(dct, orient ='index')
+        df.columns = ['sample_name', 'metabat2_dir']
+        df.to_csv(str(output), index = False)
+
+
+

@@ -1,0 +1,5 @@
+# --- Parameters --- #
+
+# --- metabat2_binning --- #
+
+min_contig_len: 2500
