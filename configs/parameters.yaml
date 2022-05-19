@@ -1,5 +1,10 @@
 # --- Parameters --- #
 
-# --- metabat2_binning --- #
+# --- binning_algorithms --- #
 
-min_contig_len: 2500
+min_contig_len:   2500
+
+# --- concoct --- #
+
+fragment_size:    10000
+overlap_size:     0

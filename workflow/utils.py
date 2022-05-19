@@ -33,6 +33,7 @@ class Workflow_Dirs:
             makedirs(self.OUT)
             makedirs(join(self.OUT, '0_contig_coverage'))
             makedirs(join(self.OUT, '1_metabat2'))
+            makedirs(join(self.OUT, '2_concoct'))
             makedirs(join(self.OUT, 'final_reports'))
         if not exists(self.TMP):
             makedirs(self.TMP)
@@ -41,5 +42,6 @@ class Workflow_Dirs:
             makedirs(join(self.LOG, 'map_sort'))
             makedirs(join(self.LOG, 'calculate_depth'))
             makedirs(join(self.LOG, 'metabat2_binning'))
+            makedirs(join(self.LOG, 'concoct_binning'))
             makedirs(join(self.LOG, 'make_config'))
 

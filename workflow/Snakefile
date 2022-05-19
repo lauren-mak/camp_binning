@@ -1,30 +1,27 @@
-"""Main module."""
+"""Binning workflow."""
 
 
 import os
 from os.path import basename, join
 import pandas as pd
-from utils import *
-
-
-# Load program parameters and resources
-configfile: '/home/lam4003/bin/camp_binning/configs/parameters.yaml'
-configfile: '/home/lam4003/bin/camp_binning/configs/resources.yaml'
-
-
-# Load and/or make the working directory structure
-dirs = Workflow_Dirs(config['work_dir'], 'binning')
-
-
-# Load sample names and input files 
-SAMPLES = ingest_samples(config['samples'], dirs.TMP)
 
 
 # --- Workflow output --- #
 
+
 rule all:
     input:
         join(dirs.OUT, 'final_reports', 'samples.csv') # sample name, bin directories
+
+
+def workflow_mode():
+    BINNERS = ['1_metabat2', '2_concoct']
+    if cap2:
+        return expand(join(dirs.OUT, '{binner}', '{sample}_done.txt'), \
+                      binner = BINNERS, sample = SAMPLES),
+    else:
+        return expand(join(dirs.OUT, '{binner}', '{sample}_done.txt'), \
+                      sample = BINNERS, sample = SAMPLES),
 
 
 # --- Workflow modules --- #
@@ -35,7 +32,7 @@ rule map_sort:
         rev = join(dirs.TMP, '{sample}_2.fastq'),
         ctg = join(dirs.TMP, '{sample}.fasta'),
     output:
-        join(dirs.OUT, '0_contig_coverage', '{sample}', 'coverage.bam'), # TODO temp?
+        join(dirs.OUT, '0_contig_coverage', '{sample}', 'coverage.bam'), 
         join(dirs.OUT, '0_contig_coverage', '{sample}', 'coverage.bam.bai'),
     log:
         join(dirs.LOG, 'map_sort', '{sample}.out'),
@@ -49,34 +46,39 @@ rule map_sort:
         """
         CTG_PREFIX=$(basename {input.ctg} .fasta)
         mkdir -p {params.out_dir}
-        bowtie2-build {input.ctg} {params.out_dir}/$CTG_PREFIX
+        bowtie2-build {input.ctg} {params.out_dir}/$CTG_PREFIX > {log} 2>&1
         bowtie2 -x {params.out_dir}/$CTG_PREFIX -p {threads} \
             -1 {input.fwd} -2 {input.rev} | \
             samtools view -@ {threads} -uS - | \
-            samtools sort -@ {threads} - -o {params.out_dir}/coverage.bam
-        samtools index -@ {threads} {params.out_dir}/coverage.bam
+            samtools sort -@ {threads} - \
+            -o {params.out_dir}/coverage.bam > {log} 2>&1
+        samtools index -@ {threads} {params.out_dir}/coverage.bam > {log} 2>&1
         """
 
 
-rule calculate_depth:
+rule metabat2_calculate_depth:
     input:
         join(dirs.OUT, '0_contig_coverage', '{sample}', 'coverage.bam'),
     output:
-        join(dirs.OUT, '0_contig_coverage', '{sample}', 'coverage.txt'),
+        join(dirs.OUT, '1_metabat2', '{sample}', 'coverage.txt'),
     log:
-        join(dirs.LOG, 'calculate_depth', '{sample}.out'),
+        join(dirs.LOG, 'calculate_depth', 'metabat2_{sample}.out'),
+    params:
+        out_dir = join(dirs.OUT, '1_metabat2', '{sample}'),
     shell:
         """
-        jgi_summarize_bam_contig_depths {input} --outputDepth {output}
+        mkdir -p {params.out_dir}
+        jgi_summarize_bam_contig_depths {input} --outputDepth {output} \
+            > {log} 2>&1
         """
 
 
 rule metabat2_binning:
     input:
-        cov = join(dirs.OUT, '0_contig_coverage', '{sample}', 'coverage.txt'),
+        cov = join(dirs.OUT, '1_metabat2', '{sample}', 'coverage.txt'),
         ctg = join(dirs.TMP, '{sample}.fasta'),
     output:
-        join(dirs.OUT, '1_metabat2', '{sample}', 'done.txt'),
+        join(dirs.OUT, '1_metabat2', '{sample}_done.txt'),
     log:
         join(dirs.LOG, 'metabat2_binning', '{sample}.out'), 
     threads: config['metabat2_binning_threads'],
@@ -89,24 +91,110 @@ rule metabat2_binning:
     shell:
         """
         metabat2 -m {params.min_len} -t {threads} --unbinned \
-            -i {input.ctg} -a {input.cov} -o {params.out_dir}
-        echo {params.out_dir} > {output}
+            -i {input.ctg} -a {input.cov} -o {params.out_dir} > {log} 2>&1
+        touch {output}
+        """
+
+
+rule concoct_calculate_depth:
+    input:
+        ctg = join(dirs.TMP, '{sample}.fasta'),
+        bam = join(dirs.OUT, '0_contig_coverage', '{sample}', 'coverage.bam'), 
+    output:
+        fa = join(dirs.OUT, '2_concoct', '{sample}_' + \
+            str(config['fragment_size']) + '.fasta'),
+        cov = join(dirs.OUT, '2_concoct', '{sample}_coverage.txt'),
+    conda:
+        join(config['env_yamls'], 'concoct.yaml'),
+    log:
+        join(dirs.LOG, 'calculate_depth', 'concoct_{sample}.out'),
+    params:
+        frag_size = config['fragment_size'],
+        olap_size = config['overlap_size'],
+        out_dir = join(dirs.OUT, '2_concoct', '{sample}'),
+    shell:
+        """
+        mkdir -p {params.out_dir}
+        cut_up_fasta.py {input.ctg} -c {params.frag_size} -o {params.olap_size} \
+            --merge_last -b {params.out_dir}/{params.frag_size}.bed \
+            > {params.out_dir}/{params.frag_size}.fa 2> {log}
+        concoct_coverage_table.py {params.out_dir}/{params.frag_size}.bed \
+            {input.bam} > {output.cov} 2> {log}
+        """
+
+
+rule concoct_binning:
+    input:
+        fa = join(dirs.OUT, '2_concoct', '{sample}_' + \
+            str(config['fragment_size']) + '.fasta'),
+        cov = join(dirs.OUT, '2_concoct', '{sample}_coverage.txt'),
+    output:
+        join(dirs.OUT, '2_concoct', '{sample}_' + \
+             'clustering_gt' + str(config['fragment_size']) + '.csv'),
+    conda:
+        join(config['env_yamls'], 'concoct.yaml'),
+    log:
+        join(dirs.LOG, 'concoct_binning', '{sample}.out'), 
+    threads: config['concoct_binning_threads'],
+    resources:
+        mem = lambda wildcards, attempt: \
+              int(config['concoct_binning_mem_mb']) + 40000 * attempt,
+    params:
+        min_len = config['min_contig_len'],
+        frag_size = config['fragment_size'],
+        out_dir = join(dirs.OUT, '2_concoct', '{sample}'),
+    shell:
+        """
+        mkdir -p {params.out_dir}
+        concoct --composition_file {input.fa} --coverage_file {input.cov} \
+            -l {params.min_len} -t {threads} -b {params.out_dir}/ > {log} 2>&1
+        mv {params.out_dir}/clustering_gt{params.frag_size}.csv {output}
+        """
+
+
+rule concoct_cleanup:
+    input:
+        concoct = join(dirs.OUT, '2_concoct', '{sample}_' + \
+             'clustering_gt' + str(config['fragment_size']) + '.csv'),
+        ctg = join(dirs.TMP, '{sample}.fasta'),
+    output:
+        join(dirs.OUT, '2_concoct', '{sample}_done.txt'),
+    conda:
+        join(config['env_yamls'], 'concoct.yaml'),
+    params:
+        sample = '{sample}',
+        out_dir = join(dirs.OUT, '2_concoct'),
+    shell:
+        """
+        sed  -i '1i contig_id,cluster_id' {input.concoct} 
+        merge_cutup_clustering.py {input.concoct} > \
+            {params.out_dir}/{params.sample}_merged_gt{frag}.csv
+        split_concoct_bins.py \
+            {params.out_dir}/{params.sample}_merged_gt{frag}.csv \
+            {input.ctg} {params.out_dir}/{params.sample}/
+        touch {output}
         """
 
 
 rule make_config:
     input:
-        expand(join(dirs.OUT, '1_metabat2', '{sample}', 'done.txt'), \
-               sample = SAMPLES),
+        workflow_mode,
     output:
         join(dirs.OUT, 'final_reports', 'samples.csv')
     run:
         dct = {}
         for i in input:
-            d = open(str(i), 'r').readline().strip()
-            dct[basename(d)] = d
+            info = str(i).split('/')
+            s = info[-1].split('_')[0]
+            d = info[-2].split('_')[1]
+            if s not in dct:
+                dct[s] = {}
+            dct[s][d] = join(*info[:-1].extend([s]))
         df = pd.DataFrame.from_dict(dct, orient ='index')
-        df.columns = ['sample_name', 'metabat2_dir']
+        mag_bin_dirs = df.columns
+        df['sample_name'] = df.index
+        df.columns = ['sample_name'] + mag_bin_dirs
+        df.reset_index(inplace = True)
         df.to_csv(str(output), index = False)
 
 
