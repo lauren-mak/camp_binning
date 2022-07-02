@@ -1,9 +1,19 @@
-"""Binning workflow."""
+'''Workflow for the CAMP binning module.'''
 
 
+from contextlib import redirect_stderr
 import os
 from os.path import basename, join
 import pandas as pd
+from utils import Workflow_Dirs, ingest_samples, cut_up_fasta, make_concoct_table, split_concoct_output
+
+
+# Load and/or make the working directory structure
+dirs = Workflow_Dirs(config['work_dir'], 'binning')
+
+
+# Load sample names and input files 
+SAMPLES = ingest_samples(config['samples'], dirs.TMP)
 
 
 # --- Workflow output --- #
@@ -14,14 +24,14 @@ rule all:
         join(dirs.OUT, 'final_reports', 'samples.csv') # sample name, bin directories
 
 
-def workflow_mode():
+def workflow_mode(wildcards):
     BINNERS = ['1_metabat2', '2_concoct']
-    if cap2:
+    if config['cap2']:
         return expand(join(dirs.OUT, '{binner}', '{sample}_done.txt'), \
-                      binner = BINNERS, sample = SAMPLES),
+                      binner = BINNERS, sample = SAMPLES)
     else:
         return expand(join(dirs.OUT, '{binner}', '{sample}_done.txt'), \
-                      sample = BINNERS, sample = SAMPLES),
+                      binner = BINNERS, sample = SAMPLES)
 
 
 # --- Workflow modules --- #
@@ -91,7 +101,8 @@ rule metabat2_binning:
     shell:
         """
         metabat2 -m {params.min_len} -t {threads} --unbinned \
-            -i {input.ctg} -a {input.cov} -o {params.out_dir} > {log} 2>&1
+            -i {input.ctg} -a {input.cov} -o {params.out_dir}/bin > {log} 2>&1
+        mv {params.out_dir}/bin.unbinned.fa {params.out_dir}/unbinned.fa
         touch {output}
         """
 
@@ -101,86 +112,71 @@ rule concoct_calculate_depth:
         ctg = join(dirs.TMP, '{sample}.fasta'),
         bam = join(dirs.OUT, '0_contig_coverage', '{sample}', 'coverage.bam'), 
     output:
-        fa = join(dirs.OUT, '2_concoct', '{sample}_' + \
+        fa = join(dirs.OUT, '2_concoct', '{sample}', \
             str(config['fragment_size']) + '.fasta'),
-        cov = join(dirs.OUT, '2_concoct', '{sample}_coverage.txt'),
-    conda:
-        join(config['env_yamls'], 'concoct.yaml'),
+        cov = join(dirs.OUT, '2_concoct', '{sample}', 'coverage.txt'),
     log:
         join(dirs.LOG, 'calculate_depth', 'concoct_{sample}.out'),
     params:
         frag_size = config['fragment_size'],
         olap_size = config['overlap_size'],
         out_dir = join(dirs.OUT, '2_concoct', '{sample}'),
-    shell:
-        """
-        mkdir -p {params.out_dir}
-        cut_up_fasta.py {input.ctg} -c {params.frag_size} -o {params.olap_size} \
-            --merge_last -b {params.out_dir}/{params.frag_size}.bed \
-            > {params.out_dir}/{params.frag_size}.fa 2> {log}
-        concoct_coverage_table.py {params.out_dir}/{params.frag_size}.bed \
-            {input.bam} > {output.cov} 2> {log}
-        """
+    run:
+        with open(log[0], 'w') as l:
+            with redirect_stderr(l):
+                print('Now writing to {}'.format(log))
+                outbed = "{}/{}.bed".format(params.out_dir, params.frag_size)
+                cut_up_fasta(input.ctg, params.frag_size, params.olap_size, \
+                    params.out_dir, output.fa, outbed)
+                make_concoct_table(outbed, input.bam, output.cov)
 
 
 rule concoct_binning:
     input:
-        fa = join(dirs.OUT, '2_concoct', '{sample}_' + \
+        fa = join(dirs.OUT, '2_concoct', '{sample}', \
             str(config['fragment_size']) + '.fasta'),
-        cov = join(dirs.OUT, '2_concoct', '{sample}_coverage.txt'),
+        cov = join(dirs.OUT, '2_concoct', '{sample}', 'coverage.txt'),
     output:
-        join(dirs.OUT, '2_concoct', '{sample}_' + \
-             'clustering_gt' + str(config['fragment_size']) + '.csv'),
+        join(dirs.OUT, '2_concoct', '{sample}', \
+             'clustering_gt' + str(config['min_contig_len']) + '.csv'),
     conda:
         join(config['env_yamls'], 'concoct.yaml'),
     log:
         join(dirs.LOG, 'concoct_binning', '{sample}.out'), 
-    threads: config['concoct_binning_threads'],
     resources:
         mem = lambda wildcards, attempt: \
               int(config['concoct_binning_mem_mb']) + 40000 * attempt,
     params:
         min_len = config['min_contig_len'],
-        frag_size = config['fragment_size'],
         out_dir = join(dirs.OUT, '2_concoct', '{sample}'),
     shell:
         """
         mkdir -p {params.out_dir}
         concoct --composition_file {input.fa} --coverage_file {input.cov} \
-            -l {params.min_len} -t {threads} -b {params.out_dir}/ > {log} 2>&1
-        mv {params.out_dir}/clustering_gt{params.frag_size}.csv {output}
+            -l {params.min_len} -b {params.out_dir}/ > {log} 2>&1
+        sed -i '1i contig_id,cluster_id' {output}
         """
 
 
-rule concoct_cleanup:
+rule split_concoct_output:
     input:
-        concoct = join(dirs.OUT, '2_concoct', '{sample}_' + \
-             'clustering_gt' + str(config['fragment_size']) + '.csv'),
+        concoct = join(dirs.OUT, '2_concoct', '{sample}', \
+             'clustering_gt' + str(config['min_contig_len']) + '.csv'),
         ctg = join(dirs.TMP, '{sample}.fasta'),
     output:
         join(dirs.OUT, '2_concoct', '{sample}_done.txt'),
-    conda:
-        join(config['env_yamls'], 'concoct.yaml'),
     params:
-        sample = '{sample}',
-        out_dir = join(dirs.OUT, '2_concoct'),
-    shell:
-        """
-        sed  -i '1i contig_id,cluster_id' {input.concoct} 
-        merge_cutup_clustering.py {input.concoct} > \
-            {params.out_dir}/{params.sample}_merged_gt{frag}.csv
-        split_concoct_bins.py \
-            {params.out_dir}/{params.sample}_merged_gt{frag}.csv \
-            {input.ctg} {params.out_dir}/{params.sample}/
-        touch {output}
-        """
+        out_dir = join(dirs.OUT, '2_concoct', '{sample}'),
+    run:
+        split_concoct_output(input.concoct, input.ctg, params.out_dir, output)
+        open(str(output), 'a').close()
 
 
 rule make_config:
     input:
         workflow_mode,
     output:
-        join(dirs.OUT, 'final_reports', 'samples.csv')
+        join(dirs.OUT, 'final_reports', 'samples.csv'),
     run:
         dct = {}
         for i in input:
@@ -189,12 +185,10 @@ rule make_config:
             d = info[-2].split('_')[1]
             if s not in dct:
                 dct[s] = {}
-            dct[s][d] = join(*info[:-1].extend([s]))
+            dct[s][d] = join(*info[:-1] + [s])
         df = pd.DataFrame.from_dict(dct, orient ='index')
-        mag_bin_dirs = df.columns
-        df['sample_name'] = df.index
-        df.columns = ['sample_name'] + mag_bin_dirs
         df.reset_index(inplace = True)
+        df.rename(columns = {'index': 'sample_name'}, inplace = True)
         df.to_csv(str(output), index = False)
 
 
