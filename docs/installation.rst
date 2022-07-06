@@ -8,44 +8,14 @@ Installation
 Stable release
 --------------
 
-To install CAMP Binning, run this command in your terminal:
+1. Clone repo from `github <https://github.com/lauren-mak/camp_binning>_`. 
 
-.. code-block:: console
+2. Set up the conda environment (contains, Snakemake) using ``configs/conda/camp_binning.yaml``. 
+    - There are some compatibility issues that I haven't ironed out (samtools and bowtie2 due to RedHat's geriatric dependencies), so you may have to substitute in your own versions of those two tools. 
 
-    $ pip install camp_binning
-
-This is the preferred method to install CAMP Binning, as it will always install the most recent stable release.
-
-If you don't have `pip`_ installed, this `Python installation guide`_ can guide
-you through the process.
-
-.. _pip: https://pip.pypa.io
-.. _Python installation guide: http://docs.python-guide.org/en/latest/starting/installation/
-
-
-From sources
-------------
-
-The sources for CAMP Binning can be downloaded from the `Github repo`_.
-
-You can either clone the public repository:
-
-.. code-block:: console
-
-    $ git clone git://github.com/lauren-mak/camp_binning
-
-Or download the `tarball`_:
-
-.. code-block:: console
-
-    $ curl -OJL https://github.com/lauren-mak/camp_binning/tarball/master
-
-Once you have a copy of the source, you can install it with:
-
-.. code-block:: console
-
-    $ python setup.py install
-
-
-.. _Github repo: https://github.com/lauren-mak/camp_binning
-.. _tarball: https://github.com/lauren-mak/camp_binning/tarball/master
+3. Make sure the installed pipeline works correctly. ``pytest`` only generates temporary outputs so no files should be created.
+::
+    cd camp_binning
+    conda env create -f configs/conda/camp_binning.yaml
+    conda activate camp_binning
+    pytest .tests/unit/

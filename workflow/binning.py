@@ -2,7 +2,6 @@
 
 
 import click
-from os import environ
 from os.path import abspath, exists, join
 from snakemake import snakemake
 

@@ -34,7 +34,7 @@ def workflow_mode(wildcards):
                       binner = BINNERS, sample = SAMPLES)
 
 
-# --- Workflow modules --- #
+# --- Workflow steps --- #
 
 rule map_sort:
     input:
