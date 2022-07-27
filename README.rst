@@ -23,15 +23,14 @@ Installation
 ------------
 
 1. Clone repo from `github <https://github.com/lauren-mak/camp_binning>_`. 
-    - Note: This is not a generic template for CAP2/CAMP modules. 
 
-2. Set up the conda environment (contains, Snakemake) using ``configs/conda/camp_binning.yaml``. 
-    - There are some compatibility issues that I haven't ironed out (samtools and bowtie2 due to RedHat's geriatric dependencies), so you may have to substitute in your own versions of those two tools. 
+2. Set up the conda environment (contains, Snakemake) using ``configs/conda/binning.yaml``. 
+    - There are some compatibility issues that I haven't ironed out (bowtie2 due to RedHat's geriatric dependencies), so you may have to substitute in your own version. 
 
 3. Make sure the installed pipeline works correctly. ``pytest`` only generates temporary outputs so no files should be created.
 ::
     cd camp_binning
-    conda env create -f configs/conda/camp_binning.yaml
+    conda env create -f configs/conda/binning.yaml
     conda activate camp_binning
     pytest .tests/unit/
 
@@ -54,10 +53,11 @@ Using the Module
         └── __init__.py
 - ``workflow/binning.py``: Click-based CLI that wraps the ``snakemake`` and unit test generation commands for clean management of parameters, resources, and environment variables.
 - ``workflow/Snakefile``: The ``snakemake`` pipeline. 
-- ``workflow/utils.py``: 
+- ``workflow/utils.py``: Utility functions used in the pipeline and the CLI.
 
 1. Make your own ``samples.csv`` based on the template in ``configs/samples.csv``. Sample test data can be found in ``.tests/unit/map_sort/data/work_dir/tmp/``.
-    * ``samples.csv`` requires absolute paths to Illumina reads (currently, ``ingest_samples`` in ``workflow/utils.py`` expects FastQs) and de novo assembled contigs.  
+    * ``ingest_samples`` in ``workflow/utils.py`` expects Illumina reads in FastQ (may be gzipped) form and de novo assembled contigs in FastA form
+    * ``samples.csv`` requires either absolute paths or symlinks relative to the directory that the module is being run in
 
 2. Update the relevant ``metabat2`` and ``concoct`` parameters in ``configs/parameters.yaml``.
 
@@ -92,9 +92,9 @@ These instructions are meant for developers who have made a tool and want to int
 
 1. Write a module rule that wraps your tool and integrates its input and output into the pipeline. 
     * This is a great `Snakemake tutorial <https://bluegenes.github.io/hpc-snakemake-tips/>`_ for writing basic Snakemake rules.
-    * If you're adding new tools from an existing YAML, use ``conda env update --file configs/conda/camp_binning.yaml --prune``.
+    * If you're adding new tools from an existing YAML, use ``conda env update --file configs/conda/binning.yaml --prune``.
 2. Update the ``make_config`` in ``workflow/Snakefile`` rule to check for your tool's output files. Update ``samples.csv`` to document its output if downstream modules/tools are meant to ingest it. 
-3. If applicable, update the default conda config using ``conda env export > config/conda/camp_binning.yaml`` with your tool and its dependencies. 
+3. If applicable, update the default conda config using ``conda env export > config/conda/binning.yaml`` with your tool and its dependencies. 
 4. Add your tool's installation and running instructions to the module documentation and (if applicable) add the repo to your `Read the Docs account <https://readthedocs.org/>`_ + turn on the Read the Docs service hook.
 5. Run the pipeline once through to make sure everything works using the test data in ``.tests/unit/map_sort/data/work_dir/tmp/``. Then, generate unit tests to ensure that others can sanity-check their installations.
 ::
@@ -114,8 +114,7 @@ These instructions are meant for developers who have made a tool and want to int
 Bugs
 ----
 
-There is a dependency error that hasn't been addressed yet, namely...
-- ``bowtie2`` in the main ``camp_binning`` conda environment, which has conflicting C++ and Perl dependencies with some other packages.
+There is a dependency error that hasn't been addressed yet, namely ``bowtie2`` in the main ``camp_binning`` conda environment, which has conflicting C++ and Perl dependencies with some other packages.
 
 Credits
 -------

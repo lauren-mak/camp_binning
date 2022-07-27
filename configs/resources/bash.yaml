@@ -1,14 +1,17 @@
-# --- Resources --- #
+#'''Command-line usage resource config.'''#
+
 
 # --- map_sort --- #
 
 map_sort_threads: 5
 map_sort_mem_mb: 20000
 
+
 # --- metabat2_binning --- #
 
 metabat2_binning_threads: 20
 metabat2_binning_mem_mb: 80000
+
 
 # --- concoct_binning --- #
 

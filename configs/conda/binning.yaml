@@ -1,4 +1,4 @@
-name: camp_binning
+name: binning
 channels:
   - conda-forge
   - bioconda

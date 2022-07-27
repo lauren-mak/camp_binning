@@ -24,14 +24,14 @@ rule all:
         join(dirs.OUT, 'final_reports', 'samples.csv') # sample name, bin directories
 
 
-def workflow_mode(wildcards):
-    BINNERS = ['1_metabat2', '2_concoct']
-    if config['cap2']:
-        return expand(join(dirs.OUT, '{binner}', '{sample}_done.txt'), \
-                      binner = BINNERS, sample = SAMPLES)
-    else:
-        return expand(join(dirs.OUT, '{binner}', '{sample}_done.txt'), \
-                      binner = BINNERS, sample = SAMPLES)
+# def workflow_mode(wildcards):
+#     BINNERS = ['1_metabat2', '2_concoct']
+#     if config['cap2']:
+#         return expand(join(dirs.OUT, '{binner}', '{sample}_done.txt'), \
+#                       binner = BINNERS, sample = SAMPLES)
+#     else:
+#         return expand(join(dirs.OUT, '{binner}', '{sample}_done.txt'), \
+#                       binner = BINNERS, sample = SAMPLES)
 
 
 # --- Workflow steps --- #
@@ -174,7 +174,8 @@ rule split_concoct_output:
 
 rule make_config:
     input:
-        workflow_mode,
+        expand(join(dirs.OUT, '{binner}', '{sample}_done.txt'), \
+                      binner = BINNERS, sample = SAMPLES),
     output:
         join(dirs.OUT, 'final_reports', 'samples.csv'),
     run:

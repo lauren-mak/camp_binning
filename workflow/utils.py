@@ -4,10 +4,21 @@
 # --- Workflow setup --- #
 
 
+import gzip
 import os
 from os import makedirs, symlink
-from os.path import exists, join
+from os.path import abspath, exists, join
 import pandas as pd
+import shutil
+
+
+def extract_from_gzip(p, out):
+    ap = abspath(p)
+    if open(ap, 'rb').read(2) == b'\x1f\x8b': # If the input is gzipped
+        with gzip.open(ap, 'rb') as f_in, open(out, 'wb') as f_out:
+            shutil.copyfileobj(f_in, f_out)
+    else: # Otherwise, symlink
+        symlink(ap, out)
 
 
 def ingest_samples(samples, tmp):
@@ -17,9 +28,9 @@ def ingest_samples(samples, tmp):
     for f in os.listdir(tmp):
         os.remove(join(tmp, f))
     for i,l in enumerate(lst):
-        symlink(l[0], join(tmp, s[i] + '.fasta'))
-        symlink(l[1], join(tmp, s[i] + '_1.fastq'))
-        symlink(l[2], join(tmp, s[i] + '_2.fastq'))
+        symlink(abspath(l[0]), join(tmp, s[i] + '.fasta'))
+        extract_from_gzip(abspath(l[1]), join(tmp, s[i] + '_1.fastq'))
+        extract_from_gzip(abspath(l[2]), join(tmp, s[i] + '_2.fastq'))
     return s
 
 

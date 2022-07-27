@@ -1,4 +1,4 @@
-#'''Slurm job submission config.'''#
+#'''Slurm job submission resource config.'''#
 
 
 __default__:
