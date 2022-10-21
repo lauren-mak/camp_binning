@@ -7,7 +7,7 @@
 import gzip
 import os
 from os import makedirs, symlink
-from os.path import abspath, exists, join
+from os.path import abspath, basename, exists, join
 import pandas as pd
 import shutil
 
@@ -25,12 +25,11 @@ def ingest_samples(samples, tmp):
     df = pd.read_csv(samples, header = 0, index_col = 0) # name, ctgs, fwd, rev
     s = list(df.index)
     lst = df.values.tolist()
-    for f in os.listdir(tmp):
-        os.remove(join(tmp, f))
     for i,l in enumerate(lst):
-        symlink(abspath(l[0]), join(tmp, s[i] + '.fasta'))
-        extract_from_gzip(abspath(l[1]), join(tmp, s[i] + '_1.fastq'))
-        extract_from_gzip(abspath(l[2]), join(tmp, s[i] + '_2.fastq'))
+        if not exists(join(tmp, s[i] + '.fasta')):
+            symlink(abspath(l[0]), join(tmp, s[i] + '.fasta'))
+            extract_from_gzip(abspath(l[1]), join(tmp, s[i] + '_1.fastq'))
+            extract_from_gzip(abspath(l[2]), join(tmp, s[i] + '_2.fastq'))
     return s
 
 
@@ -49,6 +48,7 @@ class Workflow_Dirs:
             makedirs(join(self.OUT, '0_contig_coverage'))
             makedirs(join(self.OUT, '1_metabat2'))
             makedirs(join(self.OUT, '2_concoct'))
+            makedirs(join(self.OUT, '3_vamb'))
             makedirs(join(self.OUT, 'final_reports'))
         if not exists(self.TMP):
             makedirs(self.TMP)
@@ -58,7 +58,37 @@ class Workflow_Dirs:
             makedirs(join(self.LOG, 'calculate_depth'))
             makedirs(join(self.LOG, 'metabat2_binning'))
             makedirs(join(self.LOG, 'concoct_binning'))
+            makedirs(join(self.LOG, 'vamb_binning'))
             makedirs(join(self.LOG, 'make_config'))
+
+
+def cleanup_files(work_dir, df):
+    smps = list(df.index)
+    for s in smps:
+        os.remove(join(work_dir, 'binning', '0_contig_coverage', s, 'coverage.bam'))
+        os.remove(join(work_dir, 'binning', '0_contig_coverage', s, 'coverage.bam.bai'))
+
+        
+def print_cmds(log):
+    fo = basename(log).split('.')[0] + '.cmds'
+    lines = open(log, 'r').read().split('\n')
+    fi = [l for l in lines if l != '']
+    write = False
+    with open(fo, 'w') as f_out:
+        for l in fi:
+            if 'rule' in l:
+                f_out.write('# ' + l.strip().replace('rule ', '').replace(':', '') + '\n')
+            if 'wildcards' in l: 
+                f_out.write('# ' + l.strip().replace('wildcards: ', '') + '\n')
+            if 'resources' in l:
+                write = True 
+                l = ''
+            if '[' in l: 
+                write = False 
+            if write:
+                f_out.write(l.strip() + '\n')
+            if 'rule make_config' in l:
+                break
 
 
 # --- Workflow functions --- #

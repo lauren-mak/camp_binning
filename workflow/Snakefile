@@ -24,16 +24,6 @@ rule all:
         join(dirs.OUT, 'final_reports', 'samples.csv') # sample name, bin directories
 
 
-# def workflow_mode(wildcards):
-#     BINNERS = ['1_metabat2', '2_concoct']
-#     if config['cap2']:
-#         return expand(join(dirs.OUT, '{binner}', '{sample}_done.txt'), \
-#                       binner = BINNERS, sample = SAMPLES)
-#     else:
-#         return expand(join(dirs.OUT, '{binner}', '{sample}_done.txt'), \
-#                       binner = BINNERS, sample = SAMPLES)
-
-
 # --- Workflow steps --- #
 
 rule map_sort:
@@ -48,7 +38,7 @@ rule map_sort:
         join(dirs.LOG, 'map_sort', '{sample}.out'),
     threads: config['map_sort_threads'],
     resources:
-        mem = lambda wildcards, attempt: \
+        mem_mb = lambda wildcards, attempt: \
               int(config['map_sort_mem_mb']) + 10000 * attempt,
     params:
         out_dir = join(dirs.OUT, '0_contig_coverage', '{sample}'),
@@ -93,7 +83,7 @@ rule metabat2_binning:
         join(dirs.LOG, 'metabat2_binning', '{sample}.out'), 
     threads: config['metabat2_binning_threads'],
     resources:
-        mem = lambda wildcards, attempt: \
+        mem_mb = lambda wildcards, attempt: \
               int(config['metabat2_binning_mem_mb']) + 40000 * attempt,
     params:
         min_len = config['min_contig_len'],
@@ -144,7 +134,7 @@ rule concoct_binning:
     log:
         join(dirs.LOG, 'concoct_binning', '{sample}.out'), 
     resources:
-        mem = lambda wildcards, attempt: \
+        mem_mb = lambda wildcards, attempt: \
               int(config['concoct_binning_mem_mb']) + 40000 * attempt,
     params:
         min_len = config['min_contig_len'],
@@ -169,6 +159,54 @@ rule split_concoct_output:
         out_dir = join(dirs.OUT, '2_concoct', '{sample}'),
     run:
         split_concoct_output(input.concoct, input.ctg, params.out_dir, output)
+        open(str(output), 'a').close()
+
+
+rule vamb_binning:
+    input:
+        ctg = join(dirs.TMP, '{sample}.fasta'), 
+        bam = join(dirs.OUT, '0_contig_coverage', '{sample}', 'coverage.bam'),
+    output:
+        join(dirs.OUT, '3_vamb', '{sample}', 'clusters.tsv'),
+    log:
+        join(dirs.LOG, 'vamb_binning', '{sample}.out'),
+    conda:
+        join(config['env_yamls'], 'vamb.yaml'),
+    threads: config['vamb_binning_threads'],
+    resources:
+        mem_mb = lambda wildcards, attempt: \
+              int(config['vamb_binning_mem_mb']) + 40000 * attempt,
+    params:
+        out_dir = join(dirs.OUT, '3_vamb', '{sample}'),
+        min_len = config['min_contig_len'],
+        min_bin = config['min_bin_size'],
+    shell:
+        """
+        vamb --outdir {params.out_dir} \
+            --fasta {input.ctg} \
+            --bamfiles {input.bam} \
+            -m {params.min_len} \
+            --minfasta {params.min_bin} -o C \
+            > {log} 2>&1 
+        """
+
+
+rule split_vamb_output:
+    input:
+        vamb = join(dirs.OUT, '3_vamb', '{sample}', 'clusters.tsv'),
+        ctg = join(dirs.TMP, '{sample}.fasta'),
+    output:
+        join(dirs.OUT, '3_vamb', '{sample}_done.txt'),
+    conda:
+        join(config['env_yamls'], 'vamb.yaml'),
+    params:
+        out_dir = join(dirs.OUT, '3_vamb', '{sample}'),
+    run:
+        from vamb.vambtools import Reader, read_clusters, loadfasta, write_bins
+        bins = read_clusters(str(input.vamb))
+        with Reader(str(input.ctg), 'rb') as f:
+            fasta = loadfasta(f)
+        write_bins(str(params.out_dir), bins, fasta)
         open(str(output), 'a').close()
 
 
