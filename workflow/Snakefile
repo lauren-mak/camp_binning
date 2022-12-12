@@ -3,7 +3,7 @@
 
 from contextlib import redirect_stderr
 import os
-from os.path import basename, join
+from os.path import abspath, basename, dirname, join
 import pandas as pd
 from utils import Workflow_Dirs, ingest_samples, cut_up_fasta, make_concoct_table, split_concoct_output
 
@@ -14,6 +14,12 @@ dirs = Workflow_Dirs(config['work_dir'], 'binning')
 
 # Load sample names and input files 
 SAMPLES = ingest_samples(config['samples'], dirs.TMP)
+BINNERS = ['1_metabat2', '2_concoct', '3_vamb', '4_maxbin2']
+
+
+# Specify the location of any external resources and scripts
+dirs_ext = config['ext'] # join(dirname(abspath(__file__)), 'ext')
+dirs_scr = join(dirs_ext, 'scripts')
 
 
 # --- Workflow output --- #
@@ -26,14 +32,14 @@ rule all:
 
 # --- Workflow steps --- #
 
-rule map_sort:
+
+rule map_reads:
     input:
         fwd = join(dirs.TMP, '{sample}_1.fastq'),
         rev = join(dirs.TMP, '{sample}_2.fastq'),
         ctg = join(dirs.TMP, '{sample}.fasta'),
     output:
-        join(dirs.OUT, '0_contig_coverage', '{sample}', 'coverage.bam'), 
-        join(dirs.OUT, '0_contig_coverage', '{sample}', 'coverage.bam.bai'),
+        bam = join(dirs.OUT, '0_contig_coverage', '{sample}', 'coverage.bam'), 
     log:
         join(dirs.LOG, 'map_sort', '{sample}.out'),
     threads: config['map_sort_threads'],
@@ -49,16 +55,32 @@ rule map_sort:
         bowtie2-build {input.ctg} {params.out_dir}/$CTG_PREFIX > {log} 2>&1
         bowtie2 -x {params.out_dir}/$CTG_PREFIX -p {threads} \
             -1 {input.fwd} -2 {input.rev} | \
-            samtools view -@ {threads} -uS - | \
-            samtools sort -@ {threads} - \
-            -o {params.out_dir}/coverage.bam > {log} 2>&1
-        samtools index -@ {threads} {params.out_dir}/coverage.bam > {log} 2>&1
+            samtools view -@ {threads} -uS - -o {output.bam} >> {log} 2>&1
+        """
+
+
+rule sort_reads:
+    input:
+        join(dirs.OUT, '0_contig_coverage', '{sample}', 'coverage.bam'), 
+    output:
+        bam = join(dirs.OUT, '0_contig_coverage', '{sample}', 'coverage.sort.bam'), 
+        bai = join(dirs.OUT, '0_contig_coverage', '{sample}', 'coverage.sort.bam.bai'),    
+    threads: config['map_sort_threads'],
+    resources:
+        mem_mb = lambda wildcards, attempt: \
+              int(config['map_sort_mem_mb']) + 10000 * attempt,
+    params:
+        out_dir = join(dirs.OUT, '0_contig_coverage', '{sample}'),
+    shell:
+        """
+        samtools sort -@ {threads} {input} -o {output.bam} 
+        samtools index -@ {threads} {output.bam}
         """
 
 
 rule metabat2_calculate_depth:
     input:
-        join(dirs.OUT, '0_contig_coverage', '{sample}', 'coverage.bam'),
+        join(dirs.OUT, '0_contig_coverage', '{sample}', 'coverage.sort.bam'),
     output:
         join(dirs.OUT, '1_metabat2', '{sample}', 'coverage.txt'),
     log:
@@ -92,15 +114,15 @@ rule metabat2_binning:
         """
         metabat2 -m {params.min_len} -t {threads} --unbinned \
             -i {input.ctg} -a {input.cov} -o {params.out_dir}/bin > {log} 2>&1
-        mv {params.out_dir}/bin.unbinned.fa {params.out_dir}/unbinned.fa
         touch {output}
         """
+#         mv {params.out_dir}/bin.unbinned.fa {params.out_dir}/unbinned.fa
 
 
 rule concoct_calculate_depth:
     input:
         ctg = join(dirs.TMP, '{sample}.fasta'),
-        bam = join(dirs.OUT, '0_contig_coverage', '{sample}', 'coverage.bam'), 
+        bam = join(dirs.OUT, '0_contig_coverage', '{sample}', 'coverage.sort.bam'), 
     output:
         fa = join(dirs.OUT, '2_concoct', '{sample}', \
             str(config['fragment_size']) + '.fasta'),
@@ -158,7 +180,7 @@ rule split_concoct_output:
     params:
         out_dir = join(dirs.OUT, '2_concoct', '{sample}'),
     run:
-        split_concoct_output(input.concoct, input.ctg, params.out_dir, output)
+        split_concoct_output(str(input.concoct), str(input.ctg), str(params.out_dir))
         open(str(output), 'a').close()
 
 
@@ -180,14 +202,16 @@ rule vamb_binning:
         out_dir = join(dirs.OUT, '3_vamb', '{sample}'),
         min_len = config['min_contig_len'],
         min_bin = config['min_bin_size'],
+        test_flags = config['test_flags'],
     shell:
         """
+        rm -r {params.out_dir}
         vamb --outdir {params.out_dir} \
             --fasta {input.ctg} \
             --bamfiles {input.bam} \
             -m {params.min_len} \
-            --minfasta {params.min_bin} -o C \
-            > {log} 2>&1 
+            --minfasta {params.min_bin} \
+            {params.test_flags} > {log} 2>&1 
         """
 
 
@@ -201,27 +225,141 @@ rule split_vamb_output:
         join(config['env_yamls'], 'vamb.yaml'),
     params:
         out_dir = join(dirs.OUT, '3_vamb', '{sample}'),
-    run:
-        from vamb.vambtools import Reader, read_clusters, loadfasta, write_bins
-        bins = read_clusters(str(input.vamb))
-        with Reader(str(input.ctg), 'rb') as f:
-            fasta = loadfasta(f)
-        write_bins(str(params.out_dir), bins, fasta)
-        open(str(output), 'a').close()
+        split_script = join(dirs_scr, 'split_vamb_output.py'),
+    shell:
+        """
+        python {params.split_script} {input.vamb} {input.ctg} {params.out_dir} {output}
+        """
+
+
+rule maxbin2_calculate_depth:
+    input:
+        join(dirs.OUT,'0_contig_coverage','{sample}','coverage.sort.bam'),
+    output:
+        join(dirs.OUT,'4_maxbin2','{sample}','coverage.txt'),
+    log:
+        join(dirs.LOG,'calculate_depth','maxbin2_{sample}.out'),
+    params:
+        out_dir=join(dirs.OUT,'4_maxbin2','{sample}'),
+    shell:
+        """
+        mkdir -p {params.out_dir}
+        jgi_summarize_bam_contig_depths {input} --outputDepth {output} \
+            --noIntraDepthVariance > {log} 2>&1
+        """
+
+
+rule maxbin2_make_abundances:
+    input:
+        join(dirs.OUT,'4_maxbin2','{sample}','coverage.txt'),
+    output:
+        join(dirs.OUT,'4_maxbin2','{sample}','abundances.txt'),
+    shell:
+        """
+        grep -v totalAvgDepth {input} | cut -f 1,4 > {output}
+        """
+
+
+rule maxbin2_binning:
+    input:
+        cov=join(dirs.OUT,'4_maxbin2','{sample}','abundances.txt'),
+        ctg=join(dirs.TMP,'{sample}.fasta'),
+    output:
+        join(dirs.OUT,'4_maxbin2','{sample}_binning_done.txt'),
+    log:
+        join(dirs.LOG,'maxbin2_binning','{sample}.out'),
+    threads: config['maxbin2_binning_threads'],
+    resources:
+        mem_mb=lambda wildcards, attempt: \
+            int(config['maxbin2_binning_mem_mb']) + 40000 * attempt,
+    params:
+        out_dir=join(dirs.OUT,'4_maxbin2','{sample}'),
+        min_len=config['min_contig_len'],
+        mb_script=config['maxbin2_script']
+    shell:
+        """
+        mkdir -p {params.out_dir}
+        {params.mb_script} -abund {input.cov} -contig {input.ctg} \
+            -out {params.out_dir} -min_contig_length {params.min_len} \
+            -markerset 107 -thread {threads} > {log} 2>&1
+        touch {output}
+        """
+
+
+rule rename_maxbin2_bins:
+    input:
+        join(dirs.OUT,'4_maxbin2','{sample}_binning_done.txt'),
+    output:
+        join(dirs.OUT,'4_maxbin2','{sample}_done.txt'),
+    params:
+        out_dir=join(dirs.OUT,'4_maxbin2','{sample}'),
+        min_len=config['min_contig_len'],
+    shell:
+        """
+        N=0
+        for i in $(ls {params.out_dir} | grep bin | grep .fasta); do
+            cp {params.out_dir}/$i {params.out_dir}/bin.${{N}}.fa
+            N=$((N + 1))
+        done
+        touch {output}
+        """
+
+
+rule make_dastool_input:
+    input:
+        join(dirs.OUT, '{binner}', '{sample}_done.txt'),
+    output:
+        join(dirs.OUT, '5_dastool', '{sample}', '{binner}.tsv'),
+    params:
+        in_dir = join(dirs.OUT, '{binner}', '{sample}'),
+        out_dir = join(dirs.OUT, '5_dastool', '{sample}'),
+        make_script = join(dirs_scr, 'Fasta_to_Contig2Bin.sh'),
+    shell:
+        """
+        mkdir -p {params.out_dir}
+        {params.make_script} -i {params.in_dir} -e fa > {output}
+        """
+
+
+rule dastool_refinement:
+    input:
+        ctg = join(dirs.TMP, '{sample}.fasta'),
+        tsv = lambda wildcards: expand(join(dirs.OUT, '5_dastool', '{sample}', '{binner}.tsv'), sample = wildcards.sample, binner = BINNERS)
+    output:
+        join(dirs.OUT, '5_dastool', '{sample}_done.txt'),
+    log:
+        join(dirs.LOG, 'dastool_refinement', '{sample}.out'),
+    conda:
+        join(config['env_yamls'], 'das_tool.yaml'),
+    threads: config['dastool_refinement_threads'],
+    resources:
+        mem_mb = lambda wildcards, attempt: \
+              int(config['dastool_refinement_mem_mb']) + 40000 * attempt,
+    params:
+        binners = [b.split('_')[1] for b in BINNERS],
+        prefix = join(dirs.OUT, '5_dastool', '{sample}', 'refined'),
+    shell:
+        """
+        dastool -i $(echo {input.tsv} | sed 's/ /,/g') -c {input.ctg} \
+            -l $(echo {params.binners} | sed 's/ /,/g') \
+            -o {params.prefix} --write_bins --write_bin_evals \
+            --threads {threads} > {log} 2>&1 || echo 'No refined bins found'
+        touch {output}
+        """
 
 
 rule make_config:
     input:
         expand(join(dirs.OUT, '{binner}', '{sample}_done.txt'), \
-                      binner = BINNERS, sample = SAMPLES),
+                      binner = BINNERS + ['5_dastool'], sample = SAMPLES),
     output:
         join(dirs.OUT, 'final_reports', 'samples.csv'),
     run:
         dct = {}
         for i in input:
             info = str(i).split('/')
-            s = info[-1].split('_')[0]
-            d = info[-2].split('_')[1]
+            s = info[-1]
+            d = info[-2]
             if s not in dct:
                 dct[s] = {}
             dct[s][d] = join(*info[:-1] + [s])

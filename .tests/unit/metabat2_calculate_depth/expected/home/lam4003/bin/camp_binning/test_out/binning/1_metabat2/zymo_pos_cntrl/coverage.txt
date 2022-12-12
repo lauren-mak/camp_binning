@@ -1,0 +1,9 @@
+contigName	contigLen	totalAvgDepth	coverage.sort.bam	coverage.sort.bam-var
+NODE_1_length_241_cov_1.032258	241	1.67033	1.67033	0.223443
+NODE_2_length_226_cov_1.122807	226	2	2	0
+NODE_3_length_224_cov_1.136095	224	2	2	0
+NODE_4_length_219_cov_1.170732	219	2	2	0
+NODE_5_length_159_cov_269.923077	159	1	1	0
+NODE_6_length_86_cov_20.064516	86	0	0	0
+NODE_7_length_58_cov_23.333333	58	0	0	0
+NODE_8_length_56_cov_18.000000	56	0	0	0

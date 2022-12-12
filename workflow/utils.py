@@ -33,6 +33,11 @@ def ingest_samples(samples, tmp):
     return s
 
 
+def check_make(d):
+    if not exists(d):
+        makedirs(d)
+
+
 class Workflow_Dirs:
     '''Management of the working directory tree.'''
     OUT = ''
@@ -41,34 +46,29 @@ class Workflow_Dirs:
 
     def __init__(self, work_dir, module):
         self.OUT = join(work_dir, module)
-        self.TMP = join(work_dir, 'tmp') 
-        self.LOG = join(work_dir, 'logs') 
-        if not exists(self.OUT):
-            makedirs(self.OUT)
-            makedirs(join(self.OUT, '0_contig_coverage'))
-            makedirs(join(self.OUT, '1_metabat2'))
-            makedirs(join(self.OUT, '2_concoct'))
-            makedirs(join(self.OUT, '3_vamb'))
-            makedirs(join(self.OUT, 'final_reports'))
-        if not exists(self.TMP):
-            makedirs(self.TMP)
-        if not exists(self.LOG):
-            makedirs(self.LOG)
-            makedirs(join(self.LOG, 'map_sort'))
-            makedirs(join(self.LOG, 'calculate_depth'))
-            makedirs(join(self.LOG, 'metabat2_binning'))
-            makedirs(join(self.LOG, 'concoct_binning'))
-            makedirs(join(self.LOG, 'vamb_binning'))
-            makedirs(join(self.LOG, 'make_config'))
+        self.TMP = join(work_dir, 'tmp')
+        self.LOG = join(work_dir, 'logs')
+        check_make(self.OUT)
+        out_dirs = ['0_contig_coverage', '1_metabat2', '2_concoct', '3_vamb', '5_das_tool', 'final_reports']
+        for d in out_dirs:
+            check_make(join(self.OUT, d))
+        # Add a subdirectory for symlinked-in input files
+        check_make(self.TMP)
+        # Add custom subdirectories to organize rule logs
+        check_make(self.LOG)
+        log_dirs = ['map_sort', 'calculate_depth', 'metabat2_binning', 'concoct_binning', 'vamb_binning', 'das_tool_refinement']
+        for d in log_dirs:
+            check_make(join(self.LOG, d))
 
 
 def cleanup_files(work_dir, df):
     smps = list(df.index)
     for s in smps:
         os.remove(join(work_dir, 'binning', '0_contig_coverage', s, 'coverage.bam'))
-        os.remove(join(work_dir, 'binning', '0_contig_coverage', s, 'coverage.bam.bai'))
+        os.remove(join(work_dir, 'binning', '0_contig_coverage', s, 'coverage.sort.bam'))
+        os.remove(join(work_dir, 'binning', '0_contig_coverage', s, 'coverage.sort.bam.bai'))
 
-        
+
 def print_cmds(log):
     fo = basename(log).split('.')[0] + '.cmds'
     lines = open(log, 'r').read().split('\n')
@@ -78,13 +78,13 @@ def print_cmds(log):
         for l in fi:
             if 'rule' in l:
                 f_out.write('# ' + l.strip().replace('rule ', '').replace(':', '') + '\n')
-            if 'wildcards' in l: 
+            if 'wildcards' in l:
                 f_out.write('# ' + l.strip().replace('wildcards: ', '') + '\n')
             if 'resources' in l:
-                write = True 
+                write = True
                 l = ''
-            if '[' in l: 
-                write = False 
+            if '[' in l:
+                write = False
             if write:
                 f_out.write(l.strip() + '\n')
             if 'rule make_config' in l:
@@ -147,7 +147,7 @@ def make_concoct_table(in_bed, in_bam, output):
     df = pd.read_table(fh, header=None)
     avg_coverage_depth = df[df.columns[4:]].divide((df[2]-df[1]), axis=0)
     avg_coverage_depth.index = df[3]
-    avg_coverage_depth.columns = header 
+    avg_coverage_depth.columns = header
     avg_coverage_depth.to_csv(output, index_label='contig', sep='\t', \
         float_format='%.3f')
 
@@ -162,42 +162,45 @@ def extract_bin_id(contig_id):
         return contig_id, 0
 
 
-def split_concoct_output(concoct, ctg, out_dir, output):
+def split_concoct_output(concoct, ctg, out_dir):
     # Match CONCOCT bin labels to the original contig IDs
-    df = pd.read_csv(concoct, header = 0) # contig_id,cluster_id
-    new_cols = df.apply(lambda row : extract_bin_id(row['contig_id']), axis = 1)
+    df = pd.read_csv(concoct, header=0)  # contig_id,cluster_id
+    new_cols = df.apply(lambda row: extract_bin_id(row['contig_id']), axis=1)
     df['original_contig_id'] = [i[0] for i in new_cols]
     df['part_id'] = [i[1] for i in new_cols]
-    original_to_concoct = {}
     # Find the best bin label for each original contig
     cluster_mapping = {}
-    for curr_ctg in df.original_contig_id.unique(): # For each original contig...
+    cluster_fastas = {}
+    for curr_ctg in df.original_contig_id.unique():  # For each original contig...
         sub_df = df[df['original_contig_id'] == curr_ctg]
-        if sub_df.shape[1] > 1: # If there are multiple assignments
+        if sub_df.shape[1] > 1:  # If there are multiple assignments
             c = Counter(list(sub_df['cluster_id']))
             majority_vote = c.most_common(1)[0][0]
-            possible_bins = [(a,b) for a, b in c.items()]
+            possible_bins = [(a, b) for a, b in c.items()]
             if len(c.values()) > 1:
                 sys.stderr.write('No consensus cluster for \
-                    contig {}: {}\t CONCOCT cluster: {}\n'\
-                    .format(curr_ctg, possible_bins, majority_vote))
+                    contig {}: {}\t CONCOCT cluster: {}\n' \
+                                 .format(curr_ctg, possible_bins, majority_vote))
         else:
             majority_vote = list(sub_df['cluster_id'])[0]
         cluster_mapping[curr_ctg] = majority_vote
+        cluster_fastas[majority_vote] = []
     # Split the assembly FastA into separate bin FastAs
-    current_bin = ''
-    for line in open(ctg):
+    cluster_fastas['unbinned'] = []
+    curr_bin = ''
+    curr_contig = ''
+    tmp_lines = []
+    for line in open(ctg, 'r'):
         if line.startswith('>'):
-            if current_bin != '': 
-                f.close()
-            contig = line[1:-1].split('.')[0].split()[0]
-            line = line.rsplit()[0] + '\n'
-            if contig in cluster_mapping: 
-                current_bin = 'bin.' + str(cluster_mapping[contig]) + '.fa'
-            else: 
-                current_bin = 'unbinned.fa'
-            f = open(out_dir + '/' + current_bin, 'a')
-        f.write(line)
-
-
-
+            if curr_contig != '':
+                cluster_fastas[curr_bin].extend(tmp_lines)
+                tmp_lines = []
+            curr_contig = line[1:-1].split('.')[0].split()[0]
+            curr_bin = cluster_mapping[curr_contig] if curr_contig in cluster_mapping else 'unbinned'
+            # print('{} {}'.format(curr_contig, curr_bin))
+        tmp_lines.append(line.strip())
+    # Write each separate bin FastA
+    for k, v in cluster_fastas.items():
+        with open('{}/bin.{}.fa'.format(out_dir, k), 'w') as f_out:
+            for line in v:
+                f_out.write(line + '\n')

@@ -27,6 +27,20 @@ Installation
 2. Set up the conda environment (contains, Snakemake) using ``configs/conda/binning.yaml``. 
     - There are some compatibility issues that I haven't ironed out (bowtie2 due to RedHat's geriatric dependencies), so you may have to substitute in your own version. 
 
+3. The conda version of MaxBin2 doesn't seem to work, so the best way to add it to the module is to install it separately. 
+::
+    cd bin/
+    wget https://sourceforge.net/projects/maxbin2/files/latest/download
+    spack load gcc@6.3.0 # This is only necessary for HPCs with extremely old gcc's 
+    cd MaxBin-2.2.7/
+    src/make
+    ./autobuild_auxiliary
+    wget https://github.com/loneknightpy/idba/releases/download/1.1.3/idba-1.1.3.tar.gz
+    ./configure --prefix=/home/lam4003/bin/MaxBin-2.2.7/auxiliary/idba-1.1.3 # IDBA-UD was not included in the auxiliary build
+    make
+    # Optional: Add the following to .bashrc or add the location of the executable to configs/parameters.yaml
+    PATH=$PATH:/path/to/bin/MaxBin-2.2.7:/path/to/bin/MaxBin-2.2.7/auxiliary/FragGeneScan_1.30:/path/to/bin/MaxBin-2.2.7/auxiliary/hmmer-3.1b1/src:/path/to/bin/MaxBin-2.2.7/auxiliary/bowtie2-2.2.3:/path/to/bin/MaxBin-2.2.7/auxiliary/idba-1.1.3/bin
+
 3. Make sure the installed pipeline works correctly. ``pytest`` only generates temporary outputs so no files should be created.
 ::
     cd camp_binning

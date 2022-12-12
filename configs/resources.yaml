@@ -3,8 +3,8 @@
 
 # --- map_sort --- #
 
-map_sort_threads: 5
-map_sort_mem_mb: 20000
+map_sort_threads: 20
+map_sort_mem_mb: 40000
 
 
 # --- metabat2_binning --- #
@@ -16,3 +16,21 @@ metabat2_binning_mem_mb: 80000
 # --- concoct_binning --- #
 
 concoct_binning_mem_mb: 80000
+
+
+# --- vamb_binning --- #
+
+vamb_binning_threads: 20
+vamb_binning_mem_mb: 80000
+
+
+# --- maxbin2_binning --- #
+
+maxbin2_binning_threads: 20
+maxbin2_binning_mem_mb: 80000
+
+
+# --- dastool_refinement --- #
+
+dastool_refinement_threads: 20
+dastool_refinement_mem_mb: 80000

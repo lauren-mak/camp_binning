@@ -5,7 +5,25 @@
 
 min_contig_len:   2500
 
-# --- concoct --- #
+
+# --- concoct_binning --- #
 
 fragment_size:    10000
 overlap_size:     0
+
+
+# --- vamb_binning --- #
+
+min_bin_size: 2500
+# Keep this blank- this is for testing purposes only
+test_flags: ''
+
+
+# --- maxbin2_binning --- #
+
+maxbin2_script: ''
+
+
+# --- das_tool_refinement --- #
+
+ext: ''

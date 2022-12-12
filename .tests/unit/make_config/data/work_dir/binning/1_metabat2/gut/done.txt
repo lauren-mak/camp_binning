@@ -1,1 +1,0 @@
-work_dir/binning/1_metabat2/gut

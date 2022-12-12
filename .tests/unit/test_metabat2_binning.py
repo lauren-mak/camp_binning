@@ -15,25 +15,29 @@ def test_metabat2_binning():
 
     with TemporaryDirectory() as tmpdir:
         workdir = Path(tmpdir) / "workdir"
-        data_path = PurePosixPath(".tests/unit/metabat2_binning/data")
-        expected_path = PurePosixPath(".tests/unit/metabat2_binning/expected")
+        data_path = PurePosixPath("/home/lam4003/bin/camp_binning/.tests/unit/metabat2_binning/data")
+        expected_path = PurePosixPath("/home/lam4003/bin/camp_binning/.tests/unit/metabat2_binning/expected")
 
         # Copy data to the temporary workdir.
         shutil.copytree(data_path, workdir)
 
         # dbg
-        print("work_dir/binning/1_metabat2/gut/done.txt", file=sys.stderr)
+        print("/home/lam4003/bin/camp_binning/test_out/binning/1_metabat2/zymo_pos_cntrl_done.txt", file=sys.stderr)
 
         # Run the test job.
         sp.check_output([
             "python",
             "-m",
             "snakemake", 
-            "work_dir/binning/1_metabat2/gut/done.txt",
+            "/home/lam4003/bin/camp_binning/test_out/binning/1_metabat2/zymo_pos_cntrl_done.txt",
             "-f", 
             "-j1",
             "--keep-target-files",
+            "--configfile",
+            /home/lam4003/bin/camp_binning/test_data/parameters.yaml
+            /home/lam4003/bin/camp_binning/configs/resources.yaml
     
+            "--use-conda",
             "--directory",
             workdir,
         ])

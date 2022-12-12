@@ -1,2 +1,2 @@
 sample_name,illumina_ctg,illumina_fwd,illumina_rev
-gut,/path/to/gut.fasta,/path/to/gut_1.fastq,/path/to/gut_2.fastq
+sample_name,/path/to/data/sample.fasta,/path/to/data/sample_1.fastq.gz,/path/to/data/sample_2.fastq.gz
