@@ -3,9 +3,9 @@
 
 from contextlib import redirect_stderr
 import os
-from os.path import abspath, basename, dirname, join
+from os.path import abspath, basename, dirname, exists, getsize, join
 import pandas as pd
-from utils import Workflow_Dirs, ingest_samples, cut_up_fasta, make_concoct_table, split_concoct_output
+from utils import Workflow_Dirs, ingest_samples, cut_up_fasta, make_concoct_table, split_concoct_output, get_dastool_unbinned
 
 
 # Load and/or make the working directory structure
@@ -35,8 +35,8 @@ rule all:
 
 rule map_reads:
     input:
-        fwd = join(dirs.TMP, '{sample}_1.fastq'),
-        rev = join(dirs.TMP, '{sample}_2.fastq'),
+        fwd = join(dirs.TMP, '{sample}_1.fastq.gz'),
+        rev = join(dirs.TMP, '{sample}_2.fastq.gz'),
         ctg = join(dirs.TMP, '{sample}.fasta'),
     output:
         bam = join(dirs.OUT, '0_contig_coverage', '{sample}', 'coverage.bam'), 
@@ -100,7 +100,7 @@ rule metabat2_binning:
         cov = join(dirs.OUT, '1_metabat2', '{sample}', 'coverage.txt'),
         ctg = join(dirs.TMP, '{sample}.fasta'),
     output:
-        join(dirs.OUT, '1_metabat2', '{sample}_done.txt'),
+        join(dirs.OUT, '1_metabat2', '{sample}_binned.txt'),
     log:
         join(dirs.LOG, 'metabat2_binning', '{sample}.out'), 
     threads: config['metabat2_binning_threads'],
@@ -116,7 +116,21 @@ rule metabat2_binning:
             -i {input.ctg} -a {input.cov} -o {params.out_dir}/bin > {log} 2>&1
         touch {output}
         """
-#         mv {params.out_dir}/bin.unbinned.fa {params.out_dir}/unbinned.fa
+
+
+rule move_metabat2_bins:
+    input:
+        join(dirs.OUT, '1_metabat2', '{sample}_binned.txt'),
+    output:
+        join(dirs.OUT, '1_metabat2', '{sample}_done.txt'),
+    params:
+        in_dir = join(dirs.OUT, '1_metabat2', '{sample}'),
+        out_dir = join(dirs.OUT, '1_metabat2', '{sample}', 'bins'),
+    shell:
+        """
+        mkdir -p {params.out_dir}
+        mv {params.in_dir}/bin.*.fa {params.out_dir}
+        """
 
 
 rule concoct_calculate_depth:
@@ -178,8 +192,9 @@ rule split_concoct_output:
     output:
         join(dirs.OUT, '2_concoct', '{sample}_done.txt'),
     params:
-        out_dir = join(dirs.OUT, '2_concoct', '{sample}'),
+        out_dir = join(dirs.OUT, '2_concoct', '{sample}', 'bins'),
     run:
+        if not exists(str(params.out_dir)): os.makedirs(str(params.out_dir))
         split_concoct_output(str(input.concoct), str(input.ctg), str(params.out_dir))
         open(str(output), 'a').close()
 
@@ -224,11 +239,12 @@ rule split_vamb_output:
     conda:
         join(config['env_yamls'], 'vamb.yaml'),
     params:
-        out_dir = join(dirs.OUT, '3_vamb', '{sample}'),
+        in_dir = join(dirs.OUT, '3_vamb', '{sample}'),
+        out_dir = join(dirs.OUT, '3_vamb', '{sample}', 'bins'),
         split_script = join(dirs_scr, 'split_vamb_output.py'),
     shell:
         """
-        python {params.split_script} {input.vamb} {input.ctg} {params.out_dir} {output}
+        python {params.split_script} {input.vamb} {input.ctg} {params.in_dir} {params.out_dir}
         """
 
 
@@ -265,7 +281,7 @@ rule maxbin2_binning:
         cov=join(dirs.OUT,'4_maxbin2','{sample}','abundances.txt'),
         ctg=join(dirs.TMP,'{sample}.fasta'),
     output:
-        join(dirs.OUT,'4_maxbin2','{sample}_binning_done.txt'),
+        join(dirs.OUT,'4_maxbin2','{sample}_binning.txt'),
     log:
         join(dirs.LOG,'maxbin2_binning','{sample}.out'),
     threads: config['maxbin2_binning_threads'],
@@ -286,19 +302,21 @@ rule maxbin2_binning:
         """
 
 
-rule rename_maxbin2_bins:
+rule move_maxbin2_bins:
     input:
-        join(dirs.OUT,'4_maxbin2','{sample}_binning_done.txt'),
+        join(dirs.OUT,'4_maxbin2','{sample}_binning.txt'),
     output:
         join(dirs.OUT,'4_maxbin2','{sample}_done.txt'),
     params:
-        out_dir=join(dirs.OUT,'4_maxbin2','{sample}'),
+        in_dir=join(dirs.OUT,'4_maxbin2','{sample}'),
+        out_dir=join(dirs.OUT,'4_maxbin2','{sample}', 'bins'),
         min_len=config['min_contig_len'],
     shell:
         """
+        mkdir -p {params.out_dir}
         N=0
-        for i in $(ls {params.out_dir} | grep bin | grep .fasta); do
-            cp {params.out_dir}/$i {params.out_dir}/bin.${{N}}.fa
+        for i in $(ls {params.in_dir} | grep bin | grep .fasta); do
+            cp {params.in_dir}/$i {params.out_dir}/bin.${{N}}.fa
             N=$((N + 1))
         done
         touch {output}
@@ -307,7 +325,7 @@ rule rename_maxbin2_bins:
 
 rule make_dastool_input:
     input:
-        join(dirs.OUT, '{binner}', '{sample}_done.txt'),
+        lambda wildcards: expand(join(dirs.OUT, '{binner}', '{sample}_done.txt'), binner = BINNERS, sample = wildcards.sample),
     output:
         join(dirs.OUT, '5_dastool', '{sample}', '{binner}.tsv'),
     params:
@@ -326,7 +344,7 @@ rule dastool_refinement:
         ctg = join(dirs.TMP, '{sample}.fasta'),
         tsv = lambda wildcards: expand(join(dirs.OUT, '5_dastool', '{sample}', '{binner}.tsv'), sample = wildcards.sample, binner = BINNERS)
     output:
-        join(dirs.OUT, '5_dastool', '{sample}_done.txt'),
+        join(dirs.OUT, '5_dastool', '{sample}_binned.txt'),
     log:
         join(dirs.LOG, 'dastool_refinement', '{sample}.out'),
     conda:
@@ -342,8 +360,57 @@ rule dastool_refinement:
         """
         dastool -i $(echo {input.tsv} | sed 's/ /,/g') -c {input.ctg} \
             -l $(echo {params.binners} | sed 's/ /,/g') \
-            -o {params.prefix} --write_bins --write_bin_evals \
-            --threads {threads} > {log} 2>&1 || echo 'No refined bins found'
+            -o {params.prefix} --write_bins --write_unbinned --write_bin_evals \
+            --threads {threads} > {log} 2>&1 || echo 'No refined bins made' > {log} 2>&1
+        touch {output}
+        """
+
+
+rule move_dastool_bins:
+    input:
+        join(dirs.OUT, '5_dastool', '{sample}_binned.txt'),
+    output:
+        join(dirs.OUT, '5_dastool', '{sample}_moved.txt'),
+    params:
+        in_dir = join(dirs.OUT, '5_dastool', '{sample}'),
+        out_dir = join(dirs.OUT, '5_dastool', '{sample}', 'bins'),
+    shell:
+        """
+        mkdir -p {params.out_dir}
+        N=0
+        for i in $(ls {params.in_dir} | grep .fa); do
+            cp {params.in_dir}/$i {params.out_dir}/bin.${{N}}.fa
+            N=$((N + 1))
+        done
+        touch {output}
+        """
+
+
+rule get_dastool_unbinned:
+    input:
+        join(dirs.OUT, '5_dastool', '{sample}_binned.txt'),
+    output:
+        join(dirs.OUT, '5_dastool', '{sample}_unbinned.txt'),
+    params:
+        ctg = join(dirs.TMP, '{sample}.fasta'),
+        tsv = join(dirs.OUT, '5_dastool', '{sample}', 'refined_DASTool_contig2bin.tsv'),
+        out_dir = join(dirs.OUT, '5_dastool', '{sample}', 'bins'),
+    run:
+        if getsize(str(params.tsv)) != 0:
+            get_dastool_unbinned(str(params.ctg), str(params.tsv), str(params.out_dir))
+        else: 
+            print('No refined bins made')
+        open(str(output), 'w').close()
+
+
+rule finish_dastool:
+    input:
+        join(dirs.OUT, '5_dastool', '{sample}_moved.txt'),
+        join(dirs.OUT, '5_dastool', '{sample}_unbinned.txt'),
+    output:
+        join(dirs.OUT, '5_dastool', '{sample}_done.txt'),
+    shell:
+        """
         touch {output}
         """
 
@@ -354,6 +421,8 @@ rule make_config:
                       binner = BINNERS + ['5_dastool'], sample = SAMPLES),
     output:
         join(dirs.OUT, 'final_reports', 'samples.csv'),
+    params:
+        tmp_dir = dirs.TMP,
     run:
         dct = {}
         for i in input:
@@ -362,7 +431,9 @@ rule make_config:
             d = info[-2]
             if s not in dct:
                 dct[s] = {}
-            dct[s][d] = join(*info[:-1] + [s])
+            dct[s][d] = join(*info[:-1] + [s, 'bins'])
+            dct[s]['illumina_fwd'] = join(str(params.tmp_dir),s + '_1.fastq.gz')
+            dct[s]['illumina_rev'] = join(str(params.tmp_dir),s + '_2.fastq.gz')
         df = pd.DataFrame.from_dict(dct, orient ='index')
         df.reset_index(inplace = True)
         df.rename(columns = {'index': 'sample_name'}, inplace = True)

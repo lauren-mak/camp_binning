@@ -1,2 +1,2 @@
-,illumina_fwd,illumina_rev
-zymo_pos_ctrl,/home/lam4003/bin/camp_short-read-taxonomy/test_data/zymo_pos_cntrl.r1.fq.gz,/home/lam4003/bin/camp_short-read-taxonomy/test_data/zymo_pos_cntrl.r2.fq.gz
+sample_name,illumina_ctg,illumina_fwd,illumina_rev
+zymo_pos_ctrl,/home/lam4003/bin/camp_binning/test_data/zymo_pos_cntrl.metaspades.fasta,/home/lam4003/bin/camp_binning/test_data/zymo_pos_cntrl.r1.fq.gz,/home/lam4003/bin/camp_binning/test_data/zymo_pos_cntrl.r2.fq.gz

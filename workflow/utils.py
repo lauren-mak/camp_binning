@@ -12,15 +12,6 @@ import pandas as pd
 import shutil
 
 
-def extract_from_gzip(p, out):
-    ap = abspath(p)
-    if open(ap, 'rb').read(2) == b'\x1f\x8b': # If the input is gzipped
-        with gzip.open(ap, 'rb') as f_in, open(out, 'wb') as f_out:
-            shutil.copyfileobj(f_in, f_out)
-    else: # Otherwise, symlink
-        symlink(ap, out)
-
-
 def ingest_samples(samples, tmp):
     df = pd.read_csv(samples, header = 0, index_col = 0) # name, ctgs, fwd, rev
     s = list(df.index)
@@ -28,8 +19,8 @@ def ingest_samples(samples, tmp):
     for i,l in enumerate(lst):
         if not exists(join(tmp, s[i] + '.fasta')):
             symlink(abspath(l[0]), join(tmp, s[i] + '.fasta'))
-            extract_from_gzip(abspath(l[1]), join(tmp, s[i] + '_1.fastq'))
-            extract_from_gzip(abspath(l[2]), join(tmp, s[i] + '_2.fastq'))
+            symlink(abspath(l[1]), join(tmp, s[i] + '_1.fastq.gz'))
+            symlink(abspath(l[2]), join(tmp, s[i] + '_2.fastq.gz'))
     return s
 
 
@@ -204,3 +195,20 @@ def split_concoct_output(concoct, ctg, out_dir):
         with open('{}/bin.{}.fa'.format(out_dir, k), 'w') as f_out:
             for line in v:
                 f_out.write(line + '\n')
+
+
+def get_dastool_unbinned(ctg, tsv, out_dir): # No header, just ctg\tbin
+    df = pd.read_csv(tsv, sep = '\t', header = None)
+    unbinned_df = df[df[1] == 'unbinned']
+    unbinned_ctgs = list(unbinned_df[0])
+    with open(ctg, 'r') as fi, open(join(out_dir, 'bin.unbinned.fa'), 'w') as fo:
+        print_ctg = False
+        for i, l in enumerate(fi):
+            if i % 2 == 0: 
+                print_ctg = False
+                for c in unbinned_ctgs:
+                    if c in l:
+                        print_ctg = True
+                        break
+            if print_ctg:
+                fo.write(l)

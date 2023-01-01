@@ -31,22 +31,34 @@ Installation
 ::
     cd bin/
     wget https://sourceforge.net/projects/maxbin2/files/latest/download
+    tar -xf download
     spack load gcc@6.3.0 # This is only necessary for HPCs with extremely old gcc's 
-    cd MaxBin-2.2.7/
-    src/make
+    cd MaxBin-2.2.7/src
+    make
     ./autobuild_auxiliary
     wget https://github.com/loneknightpy/idba/releases/download/1.1.3/idba-1.1.3.tar.gz
+    tar -xf idba-1.1.3.tar.gz
+    cd idba-1.1.3/
     ./configure --prefix=/home/lam4003/bin/MaxBin-2.2.7/auxiliary/idba-1.1.3 # IDBA-UD was not included in the auxiliary build
     make
-    # Optional: Add the following to .bashrc or add the location of the executable to configs/parameters.yaml
-    PATH=$PATH:/path/to/bin/MaxBin-2.2.7:/path/to/bin/MaxBin-2.2.7/auxiliary/FragGeneScan_1.30:/path/to/bin/MaxBin-2.2.7/auxiliary/hmmer-3.1b1/src:/path/to/bin/MaxBin-2.2.7/auxiliary/bowtie2-2.2.3:/path/to/bin/MaxBin-2.2.7/auxiliary/idba-1.1.3/bin
+    # Optional: Export or add the following to ~/.bashrc
+    export PATH=$PATH:/path/to/bin/MaxBin-2.2.7:/path/to/bin/MaxBin-2.2.7/auxiliary/FragGeneScan_1.30:/path/to/bin/MaxBin-2.2.7/auxiliary/hmmer-3.1b1/src:/path/to/bin/MaxBin-2.2.7/auxiliary/bowtie2-2.2.3:/path/to/bin/MaxBin-2.2.7/auxiliary/idba-1.1.3/bin
 
-3. Make sure the installed pipeline works correctly. ``pytest`` only generates temporary outputs so no files should be created.
+4. Update the locations of the test datasets in ``samples.csv``, and the relevant parameters in ``configs/parameters.yaml``.
+
+5. Make sure the installed pipeline works correctly. **Note**: Currently, the test dataset is too small for any MAGs to be reconstructed. We're working on generating one of a more appropriate size!
 ::
+    # Create and activate conda environment 
     cd camp_binning
     conda env create -f configs/conda/binning.yaml
-    conda activate camp_binning
-    pytest .tests/unit/
+    conda activate binning
+    # Run tests on the included sample dataset
+    python /path/to/camp_binning/workflow/binning.py \
+    -d /path/to/camp_binning/test_out \
+    -s /path/to/camp_binning/test_data/samples.csv \
+    -p /path/to/camp_binning/test_data/parameters.yaml \
+    -r /path/to/camp_binning/test_data/resources.yaml \
+    --cores 20
 
 Using the Module
 ----------------
@@ -65,11 +77,11 @@ Using the Module
         ├── binning.py
         ├── utils.py
         └── __init__.py
-- ``workflow/binning.py``: Click-based CLI that wraps the ``snakemake`` and unit test generation commands for clean management of parameters, resources, and environment variables.
+- ``workflow/binning.py``: Click-based CLI that wraps the ``snakemake`` and other commands for clean management of parameters, resources, and environment variables.
 - ``workflow/Snakefile``: The ``snakemake`` pipeline. 
 - ``workflow/utils.py``: Sample ingestion and work directory setup functions, and other utility functions used in the pipeline and the CLI.
 
-1. Make your own ``samples.csv`` based on the template in ``configs/samples.csv``. Sample test data can be found in ``.tests/unit/map_sort/data/work_dir/tmp/``.
+1. Make your own ``samples.csv`` based on the template in ``configs/samples.csv``.
     - ``ingest_samples`` in ``workflow/utils.py`` expects Illumina reads in FastQ (may be gzipped) form and de novo assembled contigs in FastA form
     - ``samples.csv`` requires either absolute paths or symlinks relative to the directory that the module is being run in
 
@@ -115,6 +127,15 @@ Using the Module
         -s /path/to/samples.csv > cmds.txt
     python /path/to/camp_binning/workflow/binning.py commands cmds.txt
 
+Updating the Module
+--------------------
+
+What if you've customized some components of the module, but you still want to update the rest of the module with latest version of the standard CAMP? Just do the following from within the module's home directory:
+    - The flag with the setting ``-X ours`` forces conflicting hunks to be auto-resolved cleanly by favoring the local (i.e.: your) version.
+::
+    cd /path/to/camp_binning
+    git pull -X ours
+
 Extending the Module
 --------------------
 
@@ -132,12 +153,8 @@ These instructions are meant for developers who have made a tool and want to int
 3. If applicable, update the default conda config using ``conda env export > config/conda/binning.yaml`` with your tool and its dependencies. 
     - If there are dependency conflicts, make a new conda YAML under ``configs/conda`` and specify its usage in specific rules using the ``conda`` option (see ``first_rule`` for an example).
 4. Add your tool's installation and running instructions to the module documentation and (if applicable) add the repo to your `Read the Docs account <https://readthedocs.org/>`_ + turn on the Read the Docs service hook.
-5. Run the pipeline once through to make sure everything works using the test data in ``test_data/`` if appropriate, or your own appropriately-sized test data. Then, generate unit tests to ensure that others can sanity-check their installations.
+5. Run the pipeline once through to make sure everything works using the test data in ``test_data/`` if appropriate, or your own appropriately-sized test data. 
     * Note: Python functions imported from ``utils.py`` into ``Snakefile`` should be debugged on the command-line first before being added to a rule because Snakemake doesn't port standard output/error well when using ``run:``.
-::
-    python /path/to/camp_binning/workflow/binning.py (--unit_test) \
-        -d /path/to/work/dir \
-        -s /path/to/samples.csv
 
 6. Increment the version number of the modular pipeline.
 ::
